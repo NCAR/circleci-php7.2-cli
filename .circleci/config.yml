@@ -12,11 +12,11 @@ jobs:
       - run:
           name: "Initialize rc file"
           command: |
-              mkdir -p /workspace/rc
-              echo >/workspace/rc/build-push
+              mkdir -p /tmp/workspace/rc
+              echo >/tmp/workspace/rc/build-push
        
       - persist_to_workspace:
-          root: /workspace
+          root: /tmp/workspace
           paths:
             - rc
 
@@ -27,12 +27,12 @@ jobs:
       - checkout
 
       - attach_workspace:
-          at: /workspace
+          at: /tmp/workspace
 
       - run:
           name: "Pull submodules"
           command: |
-            . /workspace/rc/build-push
+            . /tmp/workspace/rc/build-push
             git submodule sync
             git submodule update --init
 
@@ -41,13 +41,13 @@ jobs:
       - run:
           name: "Build image"
           command: |
-            . /workspace/rc/build-push
+            . /tmp/workspace/rc/build-push
             citools/docker-build -t $CIRCLE_PROJECT_REPONAME:latest .
 
       - run:
           name: "Tag image"
           command: |
-            . /workspace/rc/build-push
+            . /tmp/workspace/rc/build-push
             PHP_VERSION=`docker run --rm $CIRCLE_PROJECT_REPONAME:latest sh -c 'echo $PHP_VERSION'`
             docker tag $CIRCLE_PROJECT_REPONAME:latest ncar/$CIRCLE_PROJECT_REPONAME:latest
             docker tag $CIRCLE_PROJECT_REPONAME:latest ncar/$CIRCLE_PROJECT_REPONAME:$PHP_VERSION
@@ -58,7 +58,7 @@ jobs:
       - run:
           name: "Push to Docker hub"
           command: |
-            . /workspace/rc/build-push
+            . /tmp/workspace/rc/build-push
             docker login -u ${DOCKERHUB_USERNAME} -p ${DOCKERHUB_PASSWORD}
             docker push ncar/$CIRCLE_PROJECT_REPONAME:latest
 
@@ -82,18 +82,18 @@ jobs:
               set +e -o pipefail
               citools/check-base-image -v ncar/$CIRCLE_PROJECT_REPONAME:latest
               rc=$?
-              mkdir -p /workspace/rc
+              mkdir -p /tmp/workspace/rc
               if [ $rc = 2 ] ; then
                   exit 2
               elif [ $rc = 0 ] ; then
-                  echo "echo build-push suppressed" > /workspace/rc/build-push
-                  echo "exit 0" >> /workspace/rc/build-push
+                  echo "echo build-push suppressed" > /tmp/workspace/rc/build-push
+                  echo "exit 0" >> /tmp/workspace/rc/build-push
               else
-                  echo > /workspace/rc/build-push
+                  echo > /tmp/workspace/rc/build-push
               fi
     
       - persist_to_workspace:
-          root: /workspace
+          root: /tmp/workspace
           paths:
             - rc
 
