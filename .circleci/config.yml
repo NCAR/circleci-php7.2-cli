@@ -136,6 +136,10 @@ workflows:
     triggers:
       - schedule:
           cron: "0 1 * * *"
+          filters:
+            branches:
+              only:
+                - master
     jobs:
       - collect-base-image-info:
           context: asp-postdoc
