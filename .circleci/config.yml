@@ -135,9 +135,10 @@ workflows:
             - build
           filters:
             tags:
-              only: /^\d+\.\d+\.\d+([-+].*)?$/
+              only: /.*/
             branches:
-              ignore: /.*/
+              only:
+                - master
   nightly:
     triggers:
       - schedule:
