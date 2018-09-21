@@ -82,7 +82,7 @@ jobs:
           command: |
               read baseTag <~/saved.base.tag
               docker pull $baseTag
-              docker inspect --format='{{index .RepoTags 0}}' $baseTag > workspace/imageinfo/current.base.digest
+              docker inspect --format='{{index .RepoDigestss 0}}' $baseTag > workspace/imageinfo/current.base.digest
 
       - persist_to_workspace:
           root: workspace
