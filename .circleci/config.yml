@@ -1,0 +1,142 @@
+defaults: &defaults
+  docker:
+    - image: circleci/php:7-cli
+
+version: 2
+jobs:
+  build:
+    <<: *defaults
+
+    steps:
+      - checkout
+
+      - run:
+          name: "Get ci tools"
+          command: |
+              cd
+              curl -L -O https://raw.githubusercontent.com/NCAR/citools/master/docker-build
+              chmod +x ~/docker-build
+
+      - setup_remote_docker
+
+      - run:
+          name: "Build image"
+          command: ~/docker-build -t $CIRCLE_PROJECT_REPONAME:latest .
+
+      - run:
+          name: "Create workspace"
+          command: |
+            mkdir -p workspace/image
+            docker save -o workspace/image/$CIRCLE_PROJECT_REPONAME-image.tar $CIRCLE_PROJECT_REPONAME:latest
+
+      - persist_to_workspace:
+          root: workspace
+          paths:
+            - image
+
+  push:
+    <<: *defaults
+    
+    steps:
+
+      - attach_workspace:
+          at: workspace
+
+      - setup_remote_docker
+
+      - run:
+          name: "Log in to Docker Hub"
+          command: docker login -u ${DOCKERHUB_USERNAME} -p ${DOCKERHUB_PASSWORD}
+
+      - run:
+          name: "Reload and push docker image"
+          command: |
+            docker load < workspace/image/$CIRCLE_PROJECT_REPONAME-image.tar
+            PHP_VERSION=`docker run --rm $CIRCLE_PROJECT_REPONAME:latest sh -c 'echo $PHP_VERSION'`
+            docker tag $CIRCLE_PROJECT_REPONAME:latest ncar/$CIRCLE_PROJECT_REPONAME:latest
+            docker tag $CIRCLE_PROJECT_REPONAME:latest ncar/$CIRCLE_PROJECT_REPONAME:$PHP_VERSION
+            docker tag $CIRCLE_PROJECT_REPONAME:latest ncar/$CIRCLE_PROJECT_REPONAME:$CIRCLE_TAG
+            docker push $AWS_ECR_HOST/$CIRCLE_PROJECT_REPONAME
+
+  collect-base-image-info:
+    <<: *defaults
+
+    steps:
+
+      - setup_remote_docker
+
+      - run:
+          name: "Log in to Docker Hub"
+          command: docker login -u ${DOCKERHUB_USERNAME} -p ${DOCKERHUB_PASSWORD}
+
+      - run:
+          name: "Get saved image"
+          command: |
+              docker pull ncar/$CIRCLE_PROJECT_REPONAME:latest
+
+      - run:
+          name: "Retrieve saved base image info"
+          command: |
+              mkdir -p workspace/imageinfo
+              docker inspect \
+                --format "{{ index .Config.Labels \"base.digest\" }}" \
+                "$AWS_ECR_HOST/$CIRCLE_PROJECT_REPONAME:latest" \
+                 > workspace/imageinfo/saved.base.digest
+              docker inspect \
+                --format "{{ index .Config.Labels \"base.tag\" }}" \
+                "$AWS_ECR_HOST/$CIRCLE_PROJECT_REPONAME:latest" \
+                 > workspace/imageinfo/saved.base.tag
+
+      - run:
+          name: "Get latest base image digest"
+          command: |
+              read baseTag <~/saved.base.tag
+              docker pull $baseTag
+              docker inspect --format='{{index .RepoTags 0}}' $baseTag > workspace/imageinfo/current.base.digest
+
+      - persist_to_workspace:
+          root: workspace
+          paths:
+            - imageinfo
+
+  verify-no-base-image-update:
+    <<: *defaults
+
+    steps:
+
+      - attach_workspace:
+          at: workspace
+
+      - run:
+           name: "Compare base image digests"
+           command: |
+              echo "saved.base.digest:" `cat workspace/imageinfo/saved.base.digest`
+              echo "current.base.digest:" `cat workspace/imageinfo/current.base.digest`
+              cmp ~/saved.base.digest ~/current.base.digest
+
+workflows:
+  version: 2
+  build-push:
+    jobs:
+      - build:
+          context: sweg
+          filters:
+            tags:
+              only: /.*/
+      - push:
+          context: sweg
+          requires:
+            - build
+          filters:
+            tags:
+              only: /^\d+\.\d+\.\d+([-+].*)?$/
+            branches:
+              ignore: /.*/
+  nightly:
+    triggers:
+      - schedule:
+          cron: "0 1 * * *"
+    jobs:
+      - collect-base-image-info:
+          context: asp-postdoc
+      - verify-no-base-image-update:
