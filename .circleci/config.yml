@@ -143,4 +143,5 @@ workflows:
     jobs:
       - collect-base-image-info:
           context: asp-postdoc
-      - verify-no-base-image-update:
+      - verify-no-base-image-update
+
