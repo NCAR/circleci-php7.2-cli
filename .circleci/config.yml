@@ -104,6 +104,8 @@ workflows:
       - init-build-push
       - build-push:
           context: sweg
+          requires:
+            - init-build-push
           filters:
             tags:
               only: /.*/
@@ -121,4 +123,6 @@ workflows:
           context: asp-postdoc
       - build-push:
           context: sweg
+          requires:
+            - check-base-image-status
 
