@@ -40,7 +40,7 @@ jobs:
             docker tag $CIRCLE_PROJECT_REPONAME:latest ncar/$CIRCLE_PROJECT_REPONAME:latest
             docker tag $CIRCLE_PROJECT_REPONAME:latest ncar/$CIRCLE_PROJECT_REPONAME:$PHP_VERSION
             docker tag $CIRCLE_PROJECT_REPONAME:latest ncar/$CIRCLE_PROJECT_REPONAME:$CIRCLE_TAG
-            docker push ncar/$CIRCLE_PROJECT_REPONAME
+            docker push ncar/$CIRCLE_PROJECT_REPONAME:latest
 
   collect-base-image-info:
     <<: *defaults
