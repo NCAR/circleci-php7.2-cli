@@ -4,7 +4,65 @@ defaults: &defaults
 
 version: 2
 jobs:
+
+  init-build-push:
+    <<: *defaults
+
+    steps:
+      - run:
+          name: "Initialize rc file"
+          command: |
+              mkdir -p workspace/rc
+              echo >workspace/rc/build-push
+       
+      - persist_to_workspace:
+          root: workspace
+          paths:
+            - rc
+
   build-push:
+    <<: *defaults
+
+    steps:
+      - checkout
+
+      - attach_workspace:
+          at: workspace
+
+      - run:
+          name: "Pull submodules"
+          command: |
+            . workspace/rc/build-push
+            git submodule sync
+            git submodule update --init
+
+      - setup_remote_docker
+
+      - run:
+          name: "Build image"
+          command: |
+            . workspace/rc/build-push
+            citools/docker-build -t $CIRCLE_PROJECT_REPONAME:latest .
+
+      - run:
+          name: "Tag image"
+          command: |
+            . workspace/rc/build-push
+            PHP_VERSION=`docker run --rm $CIRCLE_PROJECT_REPONAME:latest sh -c 'echo $PHP_VERSION'`
+            docker tag $CIRCLE_PROJECT_REPONAME:latest ncar/$CIRCLE_PROJECT_REPONAME:latest
+            docker tag $CIRCLE_PROJECT_REPONAME:latest ncar/$CIRCLE_PROJECT_REPONAME:$PHP_VERSION
+            if [ -n "$CIRCLE_TAG" ] ; then
+                docker tag $CIRCLE_PROJECT_REPONAME:latest ncar/$CIRCLE_PROJECT_REPONAME:$CIRCLE_TAG
+            fi
+
+      - run:
+          name: "Push to Docker hub"
+          command: |
+            . workspace/rc/build-push
+            docker login -u ${DOCKERHUB_USERNAME} -p ${DOCKERHUB_PASSWORD}
+            docker push ncar/$CIRCLE_PROJECT_REPONAME:latest
+
+  check-base-image-status:
     <<: *defaults
 
     steps:
@@ -16,98 +74,34 @@ jobs:
               git submodule init
               git submodule update
 
-      - run:
-          name: "Get ci tools"
-          command: |
-              cd
-              curl -L -O https://raw.githubusercontent.com/NCAR/citools/master/docker-build
-              chmod +x ~/docker-build
-
       - setup_remote_docker
 
       - run:
-          name: "Build image"
-          command: ~/docker-build -t $CIRCLE_PROJECT_REPONAME:latest .
-
-      - run:
-          name: "Log in to Docker Hub"
-          command: docker login -u ${DOCKERHUB_USERNAME} -p ${DOCKERHUB_PASSWORD}
-
-      - run:
-          name: "Tag"
+          name: "Check if base image has changed"
           command: |
-            PHP_VERSION=`docker run --rm $CIRCLE_PROJECT_REPONAME:latest sh -c 'echo $PHP_VERSION'`
-            docker tag $CIRCLE_PROJECT_REPONAME:latest ncar/$CIRCLE_PROJECT_REPONAME:latest
-            docker tag $CIRCLE_PROJECT_REPONAME:latest ncar/$CIRCLE_PROJECT_REPONAME:$PHP_VERSION
-            if [ -n "$CIRCLE_TAG" ] ; then
-                docker tag $CIRCLE_PROJECT_REPONAME:latest ncar/$CIRCLE_PROJECT_REPONAME:$CIRCLE_TAG
-            fi
-
-      - run:
-          name: "Push"
-          command: |
-            docker push ncar/$CIRCLE_PROJECT_REPONAME:latest
-
-  collect-base-image-info:
-    <<: *defaults
-
-    steps:
-
-      - setup_remote_docker
-
-      - run:
-          name: "Log in to Docker Hub"
-          command: docker login -u ${DOCKERHUB_USERNAME} -p ${DOCKERHUB_PASSWORD}
-
-      - run:
-          name: "Get saved image"
-          command: |
-              docker pull ncar/$CIRCLE_PROJECT_REPONAME:latest
-
-      - run:
-          name: "Retrieve saved base image info"
-          command: |
-              mkdir -p workspace/imageinfo
-              docker inspect \
-                --format "{{ index .Config.Labels \"base.digest\" }}" \
-                "$AWS_ECR_HOST/$CIRCLE_PROJECT_REPONAME:latest" \
-                 > workspace/imageinfo/saved.base.digest
-              docker inspect \
-                --format "{{ index .Config.Labels \"base.tag\" }}" \
-                "$AWS_ECR_HOST/$CIRCLE_PROJECT_REPONAME:latest" \
-                 > workspace/imageinfo/saved.base.tag
-
-      - run:
-          name: "Get latest base image digest"
-          command: |
-              read baseTag <~/saved.base.tag
-              docker pull $baseTag
-              docker inspect --format='{{index .RepoDigestss 0}}' $baseTag > workspace/imageinfo/current.base.digest
-
+              set +e -o pipefail
+              citools/check-base-image -v ncar/$CIRCLE_PROJECT_REPONAME:latest
+              rc=$?
+              if [ $rc = 2 ] ; then
+                  exit 2
+              elif [ $rc = 0 ] ; then
+                  mkdir -p workspace/rc
+                  echo "echo build-push suppressed" > workspace/rc/build-push
+                  echo "exit 0" >> workspace/rc/build-push
+              else
+                  echo > workspace/rc/build-push
+              fi
+    
       - persist_to_workspace:
           root: workspace
           paths:
-            - imageinfo
-
-  verify-no-base-image-update:
-    <<: *defaults
-
-    steps:
-
-      - attach_workspace:
-          at: workspace
-
-      - run:
-           name: "Compare base image digests"
-           command: |
-              echo "saved.base.digest:" `cat workspace/imageinfo/saved.base.digest`
-              echo "current.base.digest:" `cat workspace/imageinfo/current.base.digest`
-              cmp ~/saved.base.digest ~/current.base.digest
+            - rc
 
 workflows:
   version: 2
   build-push:
     jobs:
+      - init-build-push
       - build-push:
           context: sweg
           filters:
@@ -123,7 +117,8 @@ workflows:
               only:
                 - master
     jobs:
-      - collect-base-image-info:
+      - check-base-image-status:
           context: asp-postdoc
-      - verify-no-base-image-update
+      - build-push:
+          context: sweg
 
