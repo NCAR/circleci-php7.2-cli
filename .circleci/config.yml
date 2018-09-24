@@ -13,7 +13,7 @@ jobs:
           name: "Initialize workspace"
           command: |
             mkdir -p /tmp/workspace/rc
-            echo >/tmp/workspace/rc
+            echo >/tmp/workspace/rc/build-push
        
       - persist_to_workspace:
           root: /tmp/workspace
