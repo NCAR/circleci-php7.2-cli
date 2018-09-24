@@ -10,10 +10,10 @@ jobs:
 
     steps:
       - run:
-          name: "Initialize rc file"
+          name: "Initialize workspace"
           command: |
-              mkdir -p /tmp/workspace/rc
-              echo >/tmp/workspace/rc/build-push
+            mkdir -p /tmp/workspace/rc
+            echo >/tmp/workspace/rc
        
       - persist_to_workspace:
           root: /tmp/workspace
@@ -24,17 +24,17 @@ jobs:
     <<: *defaults
 
     steps:
-      - checkout
-
       - attach_workspace:
           at: /tmp/workspace
+
+      - checkout
 
       - run:
           name: "Pull submodules"
           command: |
             . /tmp/workspace/rc/build-push
-            git submodule sync
-            git submodule update --init
+            git submodule init
+            git submodule update --remote citools
 
       - setup_remote_docker
 
@@ -62,7 +62,7 @@ jobs:
             docker login -u ${DOCKERHUB_USERNAME} -p ${DOCKERHUB_PASSWORD}
             docker push ncar/$CIRCLE_PROJECT_REPONAME:latest
 
-  check-base-image-status:
+  check-base-image:
     <<: *defaults
 
     steps:
@@ -72,20 +72,21 @@ jobs:
           name: "Pull submodules"
           command: |
               git submodule init
-              git submodule update
+              git submodule update --remote citools
 
       - setup_remote_docker
 
       - run:
+          name: "Initialize workspace"
+          command: mkdir -p /tmp/workspace/rc
+
+      - run:
           name: "Check if base image has changed"
           command: |
-              set +e -o pipefail
-              citools/check-base-image -v ncar/$CIRCLE_PROJECT_REPONAME:latest
-              rc=$?
-              mkdir -p /tmp/workspace/rc
-              if [ $rc = 2 ] ; then
-                  exit 2
-              elif [ $rc = 0 ] ; then
+              citools/check-base-image -v \
+                --changefile=/tmp/no-build-push \
+                ncar/$CIRCLE_PROJECT_REPONAME:latest
+              if [ -f /tmp/no-build-push ] ; then
                   echo "echo build-push suppressed" > /tmp/workspace/rc/build-push
                   echo "exit 0" >> /tmp/workspace/rc/build-push
               else
@@ -119,10 +120,10 @@ workflows:
               only:
                 - master
     jobs:
-      - check-base-image-status:
-          context: asp-postdoc
+      - check-base-image:
+          context: sweg
       - build-push:
           context: sweg
           requires:
-            - check-base-image-status
+            - check-base-image
 
